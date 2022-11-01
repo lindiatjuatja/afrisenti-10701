@@ -53,8 +53,8 @@ get_ipython().run_cell_magic('capture', '', '\n%cd {PROJECT_DIR}\n\nif os.path.i
 
 # Training Data Paths
 
-TASK = 'SubtaskA'
-TRAINING_DATA_DIR = os.path.join(PROJECT_DIR, TASK, 'train')
+TASK2 = 'SubtaskA'
+TRAINING_DATA_DIR = os.path.join(PROJECT_DIR, TASK2, 'train')
 FORMATTED_TRAIN_DATA = os.path.join(TRAINING_DATA_DIR, 'formatted-train-data')
 
 if os.path.isdir(TRAINING_DATA_DIR):
@@ -132,8 +132,8 @@ get_ipython().run_line_magic('cd', '{PROJECT_DIR}')
 
 # Training Data Paths
 
-TASK = 'SubtaskB'
-TRAINING_DATA_DIR = os.path.join(PROJECT_DIR, TASK)
+TASK2 = 'SubtaskB'
+TRAINING_DATA_DIR = os.path.join(PROJECT_DIR, TASK2)
 FORMATTED_TRAIN_DATA = os.path.join(TRAINING_DATA_DIR, 'formatted-train-data')
 
 if os.path.isdir(TRAINING_DATA_DIR):
@@ -202,4 +202,6 @@ if len(formatted_training_files) > 0:
       print(training_file + ' is not a supported file!')
 else:
   print('No files are found in this directory!')
+
+get_ipython().run_line_magic('cd', '{proj_folder}')
 
