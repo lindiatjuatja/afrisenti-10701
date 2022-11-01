@@ -1,0 +1,6 @@
+__pycache__/
+baselines/afrisent-semeval-2023/
+tmp_trainer/
+.DS_Store
+baselines/.DS_Store
+baselines/.ipynb_checkpoints/
