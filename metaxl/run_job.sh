@@ -4,7 +4,6 @@
 #SBATCH --error="/home/ttlu/afrisenti-10701/metaxl/errors/%x_%j.out"
 #SBATCH --time=12:00:00
 #SBATCH --gres=gpu:4
-#SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
