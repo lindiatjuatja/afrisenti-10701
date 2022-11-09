@@ -4,7 +4,7 @@ tmp_trainer/
 .DS_Store
 baselines/.DS_Store
 baselines/.ipynb_checkpoints/
-metaxl/data/*
+metaxl/data/*.csv
 metaxl/.ipynb_checkpoints/
 metaxl/__pycache__/
 metaxl/out/
