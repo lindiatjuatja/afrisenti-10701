@@ -11,7 +11,7 @@ from transformers import ( BertConfig,
                           get_linear_schedule_with_warmup)
 from torch import nn
 from torch.utils.data import (DataLoader, TensorDataset)
-from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data.distributed import DistributedSampler, DistributedRandomSampler
 from tqdm import tqdm, trange
 
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
