@@ -8,3 +8,6 @@ metaxl/data/*.csv
 metaxl/.ipynb_checkpoints/
 metaxl/__pycache__/
 metaxl/out/
+adapter_notebooks/tmp_trainer/*
+adapter_notebooks/training_output/*
+adapter_notebooks/.ipynb_checkpoints/*
