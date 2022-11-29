@@ -11,3 +11,7 @@ metaxl/out/
 adapter_notebooks/tmp_trainer/*
 adapter_notebooks/training_output/*
 adapter_notebooks/.ipynb_checkpoints/*
+adapter_notebooks/tmp/*
+adapter_notebooks/~/*
+baselines/*_preds.csv
+baselines/Baseline_A-XLMR_Kinya.ipynb
