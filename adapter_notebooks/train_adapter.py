@@ -95,8 +95,8 @@ def main():
 
 
     if args.train_lm or args.lm_zero_shot:
-        # lm_adapter_location = train_wiki_lm_and_save(args)
-        lm_adapter_location = args.tmp_folder+args.lang_code+'_lm_adapter'
+        lm_adapter_location = train_wiki_lm_and_save(args)
+        # lm_adapter_location = args.tmp_folder+args.lang_code+'_lm_adapter'
         lang_adapter_config = AdapterConfig.load(args.adapter_type, reduction_factor=2)
 
 
