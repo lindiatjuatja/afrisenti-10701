@@ -95,7 +95,8 @@ def main():
 
 
     if args.train_lm or args.lm_zero_shot:
-        lm_adapter_location = train_wiki_lm_and_save(args)
+        # lm_adapter_location = train_wiki_lm_and_save(args)
+        lm_adapter_location = args.tmp_folder+args.lang_code+'_lm_adapter'
         lang_adapter_config = AdapterConfig.load(args.adapter_type, reduction_factor=2)
 
 
@@ -198,7 +199,7 @@ def main():
                 freeze_model.active_adapters = Stack(task_adapter, "sa")
                 eval_trainer = AdapterTrainer(
                     model=freeze_model,
-                    eval_dataset=combined_test[0].apply(encode_batch, axis=1),
+                    eval_dataset=combined_test[0].apply(encode_batch, axis=1).reset_index()[0],
                     compute_metrics=compute_scores
                 )
                 if not args.show_bar:
