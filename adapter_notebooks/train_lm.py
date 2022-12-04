@@ -4,26 +4,22 @@ from datasets import load_dataset, load_metric
 import transformers.adapters.composition as ac
 from transformers import (
     AdapterTrainer,
-    AutoModelForMaskedLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     TrainingArguments,
 )
-from transformers.adapters.configuration import AdapterConfig
-from transformers.trainer_callback import PrinterCallback, ProgressCallback
+from transformers.trainer_callback import ProgressCallback
 import math
+from utils import get_source_data, get_target_data, make_model
 
 import warnings
 warnings.filterwarnings(action='ignore')
 
 def train_wiki_lm_and_save(
-    args
+    args, task_name, language_code, date
     ):
     valid_percentage = 10
-    language_code = args.lang_code
-    task_name = language_code + "_mlm"
-    date = args.lm_date
-    adapter_location = args.tmp_folder+language_code+'_lm_adapter'
+    adapter_location = args.tmp_folder+task_name+'_lm_adapter'
 
     training_args = TrainingArguments(
         args.tmp_folder+'lm/',
@@ -48,12 +44,7 @@ def train_wiki_lm_and_save(
     print(f'LM Train size: {len(raw_datasets["train"])}, LM Val size: {len(raw_datasets["validation"])}')
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
 
-    model = AutoModelForMaskedLM.from_pretrained(args.base_model)
-    adapter_config = AdapterConfig.load(args.adapter_type)
-    model.add_adapter(task_name, config=adapter_config)
-
-    model.train_adapter([task_name])
-    model.set_active_adapters(task_name)
+    model = make_model(args, lm=True, task_name=task_name)
 
     column_names = raw_datasets["train"].column_names
     text_column_name = "text"
