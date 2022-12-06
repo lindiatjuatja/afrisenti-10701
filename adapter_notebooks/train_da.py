@@ -1,4 +1,4 @@
-def run_da_experiment(args, encode_batch):
+def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
     import pandas as pd
     import torch
     import numpy as np
@@ -26,15 +26,28 @@ def run_da_experiment(args, encode_batch):
     for am in [am_train, am_dev, am_test]:
         am['domain'] = 1
 
-    def adapt_encode(row):
+    def adapt_encode(row, src=0):
         out = encode_batch(row)
+        if train_lm:
+            if src==1:
+                return {
+                    'imgs': torch.vstack([out['input_ids'], out['attention_mask'], torch.ones_like(out['attention_mask'])]),
+                    'labels': torch.LongTensor([out['labels']])[0],
+                    'domain': torch.LongTensor([row.domain])[0]
+                }
+            else:
+                return {
+                    'imgs': torch.vstack([out['input_ids'], out['attention_mask']]),
+                    'labels': torch.LongTensor([out['labels']])[0],
+                    'domain': torch.LongTensor([row.domain])[0]
+                }
         return {
             'imgs': torch.vstack([out['input_ids'], out['attention_mask']]),
             'labels': torch.LongTensor([out['labels']])[0],
             'domain': torch.LongTensor([row.domain])[0]
         }
 
-    en_train = en_train.apply(adapt_encode, axis=1)
+    en_train = en_train.apply(lambda x: adapt_encode(x, src=1), axis=1)
                             
     am_train = am_train.apply(adapt_encode, axis=1)
     am_dev = am_dev.apply(adapt_encode, axis=1)
@@ -91,6 +104,20 @@ def run_da_experiment(args, encode_batch):
             a = self.model(x[:, 0], x[:, 1]).pooler_output
             return a
 
+    class LMGenerator(nn.Module):
+        def __init__(self, ):
+            super().__init__()
+            self.model = make_model(args, add_head=False, task_name='da', parallel=(src_lm, tgt_lm))
+        
+        def forward(self, x):
+            if x.shape[1] == 3:
+                # source
+                a = self.model(x[:, 0], x[:, 1])[0].pooler_output
+            else:
+                # target
+                a = self.model(x[:, 0], x[:, 1])[1].pooler_output
+            return a
+
     updates_per_epoch = 4
 
     train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.per_device_batch_size, shuffle=True)
@@ -101,7 +128,11 @@ def run_da_experiment(args, encode_batch):
     num_valid_batches = len(valid_dataloader)
     num_test_batches = len(test_dataloader)
     
-    G = Generator().to(device)
+    if train_lm:
+        G = LMGenerator().to(device) 
+    else:
+        G = Generator().to(device) 
+
     C = Classifier(3, in_size=768, h=args.da_Ch).to(device)
 
     G_opt = torch.optim.AdamW(G.parameters(), lr=args.lr)
@@ -206,14 +237,14 @@ def run_da_experiment(args, encode_batch):
                         ans.append(data["target_labels"])
                     valid_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
                     valid_ans = torch.cat(ans, dim=0).cpu().numpy()
-                    valid_bal_acc = balanced_accuracy_score(valid_preds, valid_ans)
+                    valid_bal_acc = balanced_accuracy_score(valid_ans, valid_preds)
                     
                     if valid_bal_acc > best_valid:
                         best_valid = valid_bal_acc
                         best_losses = dict()
                         
                         best_losses['dev_balanced_accuracy'] = valid_bal_acc
-                        best_losses['dev_f1'] = f1_score(valid_preds, valid_ans, average='weighted')
+                        best_losses['dev_f1'] = f1_score(valid_ans, valid_preds, average='weighted')
                         
                         logits = []
                         ans = []
@@ -223,8 +254,8 @@ def run_da_experiment(args, encode_batch):
                         test_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
                         test_ans = torch.cat(ans, dim=0).cpu().numpy()
                         
-                        best_losses['test_balanced_accuracy'] = balanced_accuracy_score(test_preds, test_ans)
-                        best_losses['test_f1'] = f1_score(test_preds, test_ans, average='weighted')
+                        best_losses['test_balanced_accuracy'] = balanced_accuracy_score(test_ans, test_preds)
+                        best_losses['test_f1'] = f1_score(test_ans, test_preds, average='weighted')
                         
                         if args.save_da_adapter:
                             G.model.save_adapter(args.tmp_folder + 'da/', 'da')

@@ -6,7 +6,7 @@ from transformers import (
     AutoAdapterModel,
 )
 from transformers.adapters.configuration import AdapterConfig
-from transformers.adapters.composition import Stack
+from transformers.adapters.composition import Stack, ac
 
 train_file = 'data/multilingual_combined.csv'
 en_file = 'data/en_all.csv'
@@ -58,6 +58,8 @@ def make_model(args,
     load_head=None, 
     add_head=True,
     freeze_head=False,
+    parallel=None,
+    stack=None,
     task_name="sa"):
 
     if lm:
@@ -94,9 +96,26 @@ def make_model(args,
             slot_in_adapter(args, model, lm_adapter, task_name)
         if args.finetune_style == 'load':
             model.delete_adapter(task_name)
-            loaded = model.add_adapter(lm_adapter, config=adapter_config)
+            loaded = model.add_adapter(lm_adapter, 
+            config=AdapterConfig.load(args.adapter_type, reduction_factor=2))
             model.train_adapter(loaded)
             model.set_active_adapters(loaded)
+    elif parallel is not None:
+
+        src_adapter, tgt_adapter = parallel
+        src_adapter = model.load_adapter(src_adapter, config=adapter_config)
+        tgt_adapter = model.load_adapter(tgt_adapter, config=adapter_config)
+
+        model.active_adapters = ac.Parallel(
+            Stack(src_adapter, task_name), 
+            Stack(tgt_adapter, task_name))
+    elif stack is not None:
+        first, second = stack
+        model.delete_adapter(task_name)
+        first = model.load_adapter(first, config=adapter_config)
+        second = model.load_adapter(second, config=adapter_config)
+        model.active_adapters = Stack(first, second)
+        model.train_adapter([first, second])
 
     return model
 

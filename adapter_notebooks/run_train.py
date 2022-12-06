@@ -63,6 +63,9 @@ def main():
 
     parser.add_argument("--train_lm", action="store_true",
                             help="Train an LM using Wikipedia data")
+    # parser.add_argument("--lm_adapter_type", default='pfeiffer+inv',
+    #                         type=str,
+    #                         help="Adapter Type for LM")
     parser.add_argument("--lm_zero_shot", action="store_true",
                             help="See results for zero shot ")
     parser.add_argument("--lm_src_data", nargs=2, default=(None, None),
@@ -114,26 +117,16 @@ def main():
 
     if args.train_lm or args.lm_zero_shot:
         if args.lm_zero_src_lm_adapter == 'train':
-            args.lm_zero_tgt_lm_adapter = train_wiki_lm_and_save(
+            args.lm_zero_src_lm_adapter = train_wiki_lm_and_save(
                 args, args.lang_code+'src_lm_adapter', *args.lm_src_data)
 
         if args.lm_zero_tgt_lm_adapter == 'train':
             args.lm_zero_tgt_lm_adapter = train_wiki_lm_and_save(
-                args, args.lang_code+'src_lm_adapter', *args.lm_tgt_data)
+                args, args.lang_code+'tgt_lm_adapter', *args.lm_tgt_data)
 
 
     label2id = {"positive":0, "neutral":1, 'negative':2}
     id2label = {0:"positive", 1:"neutral", 2:'negative'}
-
-    training_args = TrainingArguments(
-        args.tmp_folder,
-        learning_rate=args.lr,
-        num_train_epochs=args.train_epochs,
-        per_device_train_batch_size=args.per_device_batch_size,
-        per_device_eval_batch_size=args.per_device_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        logging_steps=200
-    )
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
 
@@ -146,11 +139,23 @@ def main():
         return out
 
     if args.train_da:
-        da_loc = run_da_experiment(args, encode_batch)
+        da_loc = run_da_experiment(args, encode_batch, args.train_lm,
+        args.lm_zero_src_lm_adapter, args.lm_zero_tgt_lm_adapter)
+
         args.load_adapter = da_loc
         if args.finetune_style not in ['stack', 'load']:
             return
     
+    training_args = TrainingArguments(
+        args.tmp_folder,
+        learning_rate=args.lr,
+        num_train_epochs=args.train_epochs,
+        per_device_train_batch_size=args.per_device_batch_size,
+        per_device_eval_batch_size=args.per_device_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        logging_steps=200
+    )
+
 
     test_split_lengths = []
     def compute_scores(p: EvalPrediction, test_split_lengths=test_split_lengths):
@@ -161,8 +166,8 @@ def main():
             split_preds = preds[s]
             split_labels = p.label_ids[s]
             output[f'{name}_acc'] = (split_preds==split_labels).mean()
-            output[f'{name}_weighted_f1'] = f1_score(split_preds, split_labels, average='weighted')
-            output[f'{name}_balanced_accurancy'] = balanced_accuracy_score(split_preds, split_labels)
+            output[f'{name}_weighted_f1'] = f1_score(split_labels, split_preds, average='weighted')
+            output[f'{name}_balanced_accurancy'] = balanced_accuracy_score(split_labels, split_preds)
             i += split_length
         return output
 
@@ -197,7 +202,7 @@ def main():
             if not args.show_bar:
                 freeze_trainer.remove_callback(ProgressCallback)
             freeze_trainer.train()
-            print('EN performance')
+            print('Source performance')
             for key,value in freeze_trainer.evaluate().items():
                 print(key, ':', value)
             print('\n', '='*50, '\n')
@@ -251,11 +256,18 @@ def main():
 
     print(f"{len(train)} training samples, {len(test)} test samples")
 
-    
-    lm_adapter = args.load_adapter
-    if args.lm_zero_shot:
-        lm_adapter = args.lm_zero_tgt_lm_adapter
-    model = make_model(args, 
+    if args.train_lm and args.train_da:
+        model = make_model(args, 
+                stack=(args.lm_zero_tgt_lm_adapter, da_loc),
+                load_head=args.tmp_folder+'head' if args.freeze_head else None,
+                freeze_head=args.freeze_head)
+    else:
+        lm_adapter = None
+        if args.train_lm:
+            lm_adapter = args.lm_zero_tgt_lm_adapter
+        elif args.train_da:
+            lm_adapter = da_loc
+        model = make_model(args, 
                 lm_adapter=lm_adapter,
                 load_head=args.tmp_folder+'head' if args.freeze_head else None,
                 freeze_head=args.freeze_head)
