@@ -1,7 +1,6 @@
 from itertools import chain
 from datasets import load_dataset, load_metric
 
-import transformers.adapters.composition as ac
 from transformers import (
     AdapterTrainer,
     AutoTokenizer,
