@@ -159,7 +159,7 @@ TRAINING_DATA_DIR
 # In[7]:
 
 
-MAXIMUM_SEQUENCE_LENGTH = 500
+MAXIMUM_SEQUENCE_LENGTH = 128
 DATA_DIR = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', LANGUAGE_CODE)
 EVAL_DIR = os.path.join(PROJECT_DIR, TASK, 'dev')
 
@@ -344,9 +344,9 @@ len(valid_ids), len(train_ids), len(eval_ids)
 
 
 def train(criterion = nn.CrossEntropyLoss(),
-          batch_size = 32,
+          batch_size = 16,
           num_epochs = 30,
-          eval_every = 4,
+          eval_every = 3,
           params={},
           lr=0.0005,
           leave=False):
@@ -360,10 +360,11 @@ def train(criterion = nn.CrossEntropyLoss(),
     model.train()
     best_preds = []
     for epoch in range(num_epochs):
-        pbar = tqdm(range(0, len(train_ids), batch_size), leave=leave, desc=f'Epoch {epoch+1}/{num_epochs}')
+#         pbar = tqdm(range(0, len(train_ids), batch_size), leave=leave, desc=f'Epoch {epoch+1}/{num_epochs}')
         total_train_loss = 0.0
         total_points = 0
-        for i in pbar:           
+#         for i in pbar:
+        for i in range(0, len(train_ids), batch_size):
             labels = train_labels[i:i+batch_size].to(device)
             inps = train_ids[i:i+batch_size].to(device)
             lengths = train_lengths[i:i+batch_size]#.to(device)
@@ -411,7 +412,7 @@ def train(criterion = nn.CrossEntropyLoss(),
                         best_test_balanced_acc = balanced_accuracy_score(eval_labels, preds)
                         best_preds = preds
                         best_valid_acc = valid_accuracy
-                    pbar.set_description(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {(total_train_loss / total_points):.3} ' +                                          f'Curent Bal Val Acc: {valid_accuracy:.3}, Bal Test Acc @ Best Ever Val {best_test_balanced_acc:.3}, Test F1: {best_test_f1:.3}')
+#                     pbar.set_description(f'Epoch {epoch+1}/{num_epochs}, Train Loss: {(total_train_loss / total_points):.3} ' +                                          f'Curent Bal Val Acc: {valid_accuracy:.3}, Bal Test Acc @ Best Ever Val {best_test_balanced_acc:.3}, Test F1: {best_test_f1:.3}')
                 model.train()
     return best_valid_acc, best_test_f1, best_test_balanced_acc, preds, eval_labels
 
@@ -430,10 +431,10 @@ dropout = 0.0
 lstm_dropout = 0.5
 
 best_val, best_f1, best_bal_ac, best_params = 0, 0, 0, {}
-for hidden_dim in [200, 300]:
-    for emb_dim in [300, 500]:
-        for num_layers in [2, 3]:
-            for lr in [1e-3, 5e-4, 1e-4]:
+for hidden_dim in [300]:
+    for emb_dim in [500]:
+        for num_layers in [2]:
+            for lr in [1e-3, 1e-4]:
                 my_f1, my_balanced_acc, my_val = 0, 0, 0
                 params = { 'hidden_dim': hidden_dim, 'emb_dim': emb_dim, 
                     'num_layers': num_layers, 'dropout': dropout, 'lstm_dropout': lstm_dropout}

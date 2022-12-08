@@ -10,7 +10,8 @@
 
 # MODEL_NAME_OR_PATH = 'Davlan/afro-xlmr-mini'
 MODEL_NAME_OR_PATH = 'xlm-roberta-base'
-BATCH_SIZE = 32
+BATCH_SIZE = 16
+GRADIENT_ACCUMULATION_STEPS = 2
 LEARNING_RATE = 5e-5
 NUMBER_OF_TRAINING_EPOCHS = 5
 MAXIMUM_SEQUENCE_LENGTH = 128
@@ -85,6 +86,7 @@ from datasets import load_dataset
 
 import evaluate
 import transformers
+from transformers.trainer_callback import ProgressCallback
 from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
@@ -145,8 +147,6 @@ TRAINING_DATA_DIR
 
 # In[5]:
 
-
-MAXIMUM_SEQUENCE_LENGTH = 500
 DATA_DIR = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', 'multilingual')
 EVAL_DIR = os.path.join(PROJECT_DIR, TASK, 'dev')
 
@@ -222,7 +222,7 @@ label_to_id = {v: i for i, v in enumerate(label_list)}
 
 def preprocess_function(examples):
     texts =(examples['text'],)
-    result = tokenizer(*texts, padding=padding, max_length=MAXIMUM_SEQUENCE_LENGTH)
+    result = tokenizer(*texts, padding=padding, max_length=MAXIMUM_SEQUENCE_LENGTH, truncation=True)
     
     if label_to_id is not None and "label" in examples:
         result["label"] = [(label_to_id[l] if l != -1 else -1) for l in examples["label"]]
@@ -295,6 +295,7 @@ trainer = Trainer(
         per_device_train_batch_size=BATCH_SIZE,
         learning_rate=LEARNING_RATE,
         num_train_epochs=NUMBER_OF_TRAINING_EPOCHS,
+        gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
         output_dir='tmp_trainer',
         save_steps=SAVE_STEPS,
         overwrite_output_dir=True
@@ -305,11 +306,13 @@ trainer = Trainer(
     tokenizer=tokenizer,
     data_collator=data_collator,
 )
+trainer.remove_callback(ProgressCallback)
 
 # Training
 
     
 train_result = trainer.train(resume_from_checkpoint=None)
+
 metrics = train_result.metrics
 metrics["train_samples"] = len(train_dataset) 
 
@@ -352,6 +355,7 @@ for lang in languages:
         bal_acc = balanced_accuracy_score(labels, np.argmax(predictions, axis=1))
 
     data.append([LANGUAGE_CODE, lang, str(list(predictions)), str(list(labels))])
+    gc.collect()
 df = pd.DataFrame(data, columns=['source', 'target', 'predictions', 'labels'])
 df.to_csv(f'{LANGUAGE_CODE}_preds.csv', index=False)
 
@@ -364,15 +368,15 @@ print(f"f1 score: {f1:.3}, balanced acc: {bal_acc:.3}")
 # In[15]:
 
 
-import os
-get_ipython().run_line_magic('cd', '{PROJECT_DIR}')
+# import os
+# get_ipython().run_line_magic('cd', '{PROJECT_DIR}')
 
-kinya = 'jean-paul/KinyaBERT-small'
+# kinya = 'jean-paul/KinyaBERT-small'
 
-DATA_DIR = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', 'multilingual')
-OUTPUT_DIR = os.path.join(PROJECT_DIR, 'models', 'multilingual')
+# DATA_DIR = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', 'multilingual')
+# OUTPUT_DIR = os.path.join(PROJECT_DIR, 'models', 'multilingual')
 
-get_ipython().system("python starter_kit/run_textclass.py   --model_name_or_path {kinya}   --data_dir {DATA_DIR}   --do_train   --do_eval   --do_predict   --per_device_train_batch_size {BATCH_SIZE}   --learning_rate {MAXIMUM_SEQUENCE_LENGTH}   --num_train_epochs {NUMBER_OF_TRAINING_EPOCHS}   --max_seq_length {MAXIMUM_SEQUENCE_LENGTH}   --output_dir {'tmp_trainer'}   --save_steps {SAVE_STEPS}   --overwrite_output_dir")
+# get_ipython().system("python starter_kit/run_textclass.py   --model_name_or_path {kinya}   --data_dir {DATA_DIR}   --do_train   --do_eval   --do_predict   --per_device_train_batch_size {BATCH_SIZE}   --learning_rate {MAXIMUM_SEQUENCE_LENGTH}   --num_train_epochs {NUMBER_OF_TRAINING_EPOCHS}   --max_seq_length {MAXIMUM_SEQUENCE_LENGTH}   --output_dir {'tmp_trainer'}   --save_steps {SAVE_STEPS}   --overwrite_output_dir")
 
 
 # In[ ]:

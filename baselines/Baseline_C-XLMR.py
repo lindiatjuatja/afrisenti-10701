@@ -75,8 +75,8 @@ TASK = 'SubtaskA'
 
 # MODEL_NAME_OR_PATH = 'Davlan/afro-xlmr-mini'
 MODEL_NAME_OR_PATH = 'xlm-roberta-base'
-BATCH_SIZE = 4
-GRADIENT_ACCUMULATION_STEPS = 8
+BATCH_SIZE = 16
+GRADIENT_ACCUMULATION_STEPS = 2
 LEARNING_RATE = 5e-5
 NUMBER_OF_TRAINING_EPOCHS = 5
 MAXIMUM_SEQUENCE_LENGTH = 128
@@ -100,7 +100,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import SVC
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.metrics import f1_score, balanced_accuracy_score
 from tqdm import tqdm
 
@@ -123,6 +123,7 @@ from datasets import load_dataset
 
 import evaluate
 import transformers
+from transformers.trainer_callback import ProgressCallback
 from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
@@ -177,8 +178,6 @@ TRAINING_DATA_DIR
 # In[8]:
 
 
-MAXIMUM_SEQUENCE_LENGTH = 500
-
 DATA_DIR = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', LANGUAGE_CODE)
 
 
@@ -194,15 +193,6 @@ LANGUAGE_CODE
 # Set seed before initializing model.
 set_seed(42069)
 
-# obtain dev data
-df = pd.concat([pd.read_csv(DATA_DIR + '/dev.tsv', sep='\t'), pd.read_csv(DATA_DIR + '/test.tsv', sep='\t')])
-df = df.dropna()
-eval_dataset = Dataset.from_pandas(df)
-label_list = df['label'].unique().tolist()
-
-# Labels
-num_labels = len(label_list)
-print(label_list)
 
 
 # In[23]:
@@ -214,7 +204,29 @@ if USE_EN:
     print('Using EN for zero shot')
     df = pd.read_csv('../adapter_notebooks/data/en_all.csv')[['text', 'labels']].rename(
         columns={'labels':'label'})
+    
+    X_train, X_test = train_test_split(df, test_size=.3)
+    eval_dataset = Dataset.from_pandas(X_test)
+    label_list = df['label'].unique().tolist()
+    train_dataset = Dataset.from_pandas(X_train)
+    
+    # Labels
+    num_labels = len(label_list)
+    print(label_list)
 else:
+    
+    
+    # obtain dev data
+    df = pd.concat([pd.read_csv(DATA_DIR + '/dev.tsv', sep='\t'), pd.read_csv(DATA_DIR + '/test.tsv', sep='\t')])
+    df = df.dropna()
+    eval_dataset = Dataset.from_pandas(df)
+    label_list = df['label'].unique().tolist()
+    print('dev data:', eval_dataset)
+
+    # Labels
+    num_labels = len(label_list)
+    print(label_list)
+    
     lang_trains = []
     for lang in languages:
         if lang != LANGUAGE_CODE:
@@ -223,10 +235,13 @@ else:
             print('Adding', lang, 'to the training set')
             lang_trains.append(pd.read_csv(lang_data_dir + '/train.tsv', sep='\t'))
     df = pd.concat(lang_trains)
+    df = df.dropna()
+    train_dataset = Dataset.from_pandas(df)
+    print('train data:', train_dataset)
 
-df = df.dropna()
-train_dataset = Dataset.from_pandas(df)
-
+# # Labels
+# num_labels = len(label_list)
+# print(label_list)
 
 # ####Tokenization
 
@@ -276,7 +291,7 @@ label_to_id = {v: i for i, v in enumerate(label_list)}
 
 def preprocess_function(examples):
     texts =(examples['text'],)
-    result = tokenizer(*texts, padding=padding, max_length=MAXIMUM_SEQUENCE_LENGTH)
+    result = tokenizer(*texts, padding=padding, max_length=MAXIMUM_SEQUENCE_LENGTH, truncation=True)
     
     if label_to_id is not None and "label" in examples:
         result["label"] = [(label_to_id[l] if l != -1 else -1) for l in examples["label"]]
@@ -291,13 +306,13 @@ def preprocess_function(examples):
 train_dataset = train_dataset.map(
     preprocess_function,
     batched=True,
-    desc="Running tokenizer on train dataset",
+#     desc="Running tokenizer on train dataset",
 )
 
 eval_dataset = eval_dataset.map(
     preprocess_function,
     batched=True,
-    desc="Running tokenizer on validation dataset",
+#     desc="Running tokenizer on validation dataset",
 )
 
 
@@ -335,7 +350,10 @@ metric = evaluate.load("accuracy")
 def compute_metrics(p: EvalPrediction):
     preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
     preds = np.argmax(preds, axis=1)
-    return metric.compute(predictions=preds, references=p.label_ids)
+    metrics = metric.compute(predictions=preds, references=p.label_ids)
+    metrics['f1'] = f1_score(p.label_ids, preds, average='weighted')
+    metrics['bal_acc'] = balanced_accuracy_score(p.label_ids, preds)
+    return metrics
 
 
 data_collator = default_data_collator
@@ -360,6 +378,7 @@ trainer = Trainer(
     tokenizer=tokenizer,
     data_collator=data_collator,
 )
+trainer.remove_callback(ProgressCallback)
 # Training
 
 train_result = trainer.train(resume_from_checkpoint=None)
@@ -373,78 +392,35 @@ metrics = trainer.evaluate(eval_dataset=eval_dataset)
 
 metrics["eval_samples"] = len(eval_dataset)
 
+print('metrics on dev set')
 for key,value in metrics.items():
     print(key, ':', value)
 
-splitted_A = os.path.join(PROJECT_DIR, 'SubtaskA', 'train', 'splitted-train-dev-test')
+# splitted_A = os.path.join(PROJECT_DIR, 'SubtaskA', 'train', 'splitted-train-dev-test')
 
-try:
-    LANGUAGE_CODE
-except NameError:
-    LANGUAGE_CODE = 'combined'
-else:
-    pass
-
-data = []
+# try:
+#     LANGUAGE_CODE
+# except NameError:
+#     LANGUAGE_CODE = 'combined'
+# else:
+#     pass
 for lang in languages:
-    eval_path = os.path.join(splitted_A, lang)
-    df = pd.read_csv(eval_path + '/dev.tsv', sep='\t')
-    df = df.dropna()
-    lang_eval = Dataset.from_pandas(df)
-    lang_eval = lang_eval.map(
+
+    lang_data_dir = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', lang)
+    print('Testing on', lang, 'dev + test set')
+    lang_test = pd.concat([pd.read_csv(lang_data_dir + '/dev.tsv', sep='\t'), pd.read_csv(lang_data_dir + '/test.tsv', sep='\t')])
+    lang_test = Dataset.from_pandas(lang_test)
+    lang_test = lang_test.map(
         preprocess_function,
         batched=True,
-        load_from_cache_file=True,
+        load_from_cache_file=False,
         desc="Running tokenizer on validation dataset",
     )
+    predictions, labels, metrics = trainer.predict(lang_test, metric_key_prefix="eval")
+    f1 = f1_score(labels, np.argmax(predictions, axis=1), average='weighted')
+    bal_acc = balanced_accuracy_score( labels, np.argmax(predictions, axis=1))
+    print(f'{lang} results:      F1: {f1:.3}     balanced accuracy: {bal_acc:.3}')
 
-    predictions, labels, metrics = trainer.predict(lang_eval, metric_key_prefix="eval")
-
-    if LANGUAGE_CODE == lang:
-        f1 = (f1_score(labels, np.argmax(predictions, axis=1), average='weighted'))
-        bal_acc = balanced_accuracy_score( labels, np.argmax(predictions, axis=1))
-
-    data.append([LANGUAGE_CODE, lang, str(list(predictions)), str(list(labels))])
-df = pd.DataFrame(data, columns=['source', 'target', 'predictions', 'labels'])
-df.to_csv(f'{LANGUAGE_CODE}_preds.csv', index=False)
-
-
-trainer.log_metrics("eval", metrics)
-trainer.save_metrics("eval", metrics)
-print(f"f1 score: {f1:.3}, balanced acc: {bal_acc:.3}")
-
-print(df)
-
-
-# In[17]:
-
-
-# import os
-# %cd {PROJECT_DIR}
-
-
-# In[18]:
-
-
-# DATA_DIR = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', LANGUAGE_CODE)
-# OUTPUT_DIR = os.path.join(PROJECT_DIR, 'models', LANGUAGE_CODE + '_no_test')
-# kinya = 'jean-paul/KinyaBERT-small'
-
-# !python starter_kit/run_textclass.py \
-#   --model_name_or_path {kinya} \
-#   --data_dir {DATA_DIR} \
-#   --do_train \
-#   --do_eval \
-#   --per_device_train_batch_size {BATCH_SIZE} \
-#   --learning_rate {MAXIMUM_SEQUENCE_LENGTH} \
-#   --num_train_epochs {NUMBER_OF_TRAINING_EPOCHS} \
-#   --max_seq_length {MAXIMUM_SEQUENCE_LENGTH} \
-#   --output_dir {'tmp_trainer'} \
-#   --save_steps {SAVE_STEPS} \
-#   --overwrite_output_dir
-
-
-# In[ ]:
 
 
 
