@@ -6,7 +6,7 @@ from transformers import (
     AutoAdapterModel,
 )
 from transformers.adapters.configuration import AdapterConfig
-from transformers.adapters.composition import Stack, ac
+from transformers.adapters.composition import Stack, Parallel
 
 train_file = 'data/multilingual_combined.csv'
 en_file = 'data/en_all.csv'
@@ -106,7 +106,7 @@ def make_model(args,
         src_adapter = model.load_adapter(src_adapter, config=adapter_config)
         tgt_adapter = model.load_adapter(tgt_adapter, config=adapter_config)
 
-        model.active_adapters = ac.Parallel(
+        model.active_adapters = Parallel(
             Stack(src_adapter, task_name), 
             Stack(tgt_adapter, task_name))
     elif stack is not None:
