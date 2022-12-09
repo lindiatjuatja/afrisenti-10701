@@ -19,12 +19,33 @@ parser.add_argument("--lang_code",
 parser.add_argument("--use_en", 
                         action="store_true",
                         help="Enable to use english data for zero shot rather than the original language codes")
+parser.add_argument("--lr", default=1e-5, type=float,
+                        help="Learning rate for training")
+parser.add_argument("--train_epochs", default=5, type=int,
+                        help="Epochs for adapter training")
+parser.add_argument("--batch_size", default=16, type=int,
+                        help="Batch size for device")
+parser.add_argument("--gradient_accumulation_steps", default=1, type=int,
+                        help="What it sounds like")
+parser.add_argument("--epochs", default=5, type=int,
+                        help="What it sounds like")
 parser.add_argument("--seed",
                         default=42069,
                         type=int,
                         help="Random seed")
 
 args = parser.parse_args()
+
+print(args)
+
+
+MODEL_NAME_OR_PATH = 'xlm-roberta-base'
+BATCH_SIZE = args.batch_size
+GRADIENT_ACCUMULATION_STEPS = args.gradient_accumulation_steps
+LEARNING_RATE = args.lr
+NUMBER_OF_TRAINING_EPOCHS = args.epochs
+MAXIMUM_SEQUENCE_LENGTH = 128
+SAVE_STEPS = -1
 
 LANGUAGE_CODE = args.lang_code
 USE_EN = args.use_en
@@ -78,13 +99,6 @@ TASK = 'SubtaskA'
 
 
 # MODEL_NAME_OR_PATH = 'Davlan/afro-xlmr-mini'
-MODEL_NAME_OR_PATH = 'xlm-roberta-base'
-BATCH_SIZE = 16
-GRADIENT_ACCUMULATION_STEPS = 1
-LEARNING_RATE = 5e-5
-NUMBER_OF_TRAINING_EPOCHS = 5
-MAXIMUM_SEQUENCE_LENGTH = 128
-SAVE_STEPS = -1
 
 
 # 
@@ -233,7 +247,6 @@ else:
 
     df = pd.read_csv(DATA_DIR + '/train.tsv', sep='\t')
     df = df.dropna()
-    eval_dataset = Dataset.from_pandas(df)
     train_dataset = Dataset.from_pandas(df)
     print('train data:', train_dataset)
 
@@ -368,7 +381,8 @@ trainer = Trainer(
         gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
         output_dir='tmp_trainer',
         save_steps=SAVE_STEPS,
-        overwrite_output_dir=True
+        overwrite_output_dir=True,
+        seed=args.seed
     ),
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
@@ -417,7 +431,7 @@ for lang in languages:
     predictions, labels, metrics = trainer.predict(lang_test, metric_key_prefix="eval")
     f1 = f1_score(labels, np.argmax(predictions, axis=1), average='weighted')
     bal_acc = balanced_accuracy_score( labels, np.argmax(predictions, axis=1))
-    print(f'{lang} results:      F1: {f1:.3}     balanced accuracy: {bal_acc:.3}')
+    print(f'\n\n{lang} results:      F1: {f1:.3}     balanced accuracy: {bal_acc:.3}\n\n')
 
 
 

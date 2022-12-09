@@ -89,11 +89,11 @@ def main():
 
     # parser.add_argument("--load_adapter", default='', type=str, 
     #                         help="location of an additional adapter for use in the model. cannot be used with LM.")
-    parser.add_argument("--lr", default=1e-4, type=float,
+    parser.add_argument("--lr", default=1e-5, type=float,
                             help="Learning rate for adapter training")
-    parser.add_argument("--train_epochs", default=6, type=int,
+    parser.add_argument("--train_epochs", default=14, type=int,
                             help="Epochs for adapter training")
-    parser.add_argument("--per_device_batch_size", default=32, type=int,
+    parser.add_argument("--per_device_batch_size", default=16, type=int,
                             help="Batch size for device")
     parser.add_argument("--gradient_accumulation_steps", default=1, type=int,
                             help="What it sounds like")
@@ -153,7 +153,9 @@ def main():
         per_device_train_batch_size=args.per_device_batch_size,
         per_device_eval_batch_size=args.per_device_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        logging_steps=200
+        logging_steps=500,
+        save_steps=-1,
+        seed=args.seed
     )
 
 
@@ -174,7 +176,7 @@ def main():
     am_train, am_dev = get_target_data(args, test=False)
 
     combined_train, combined_test = [am_train], [am_dev]
-    print(f'loaded {len(am_train)} source train samples and {len(am_dev)} source test samples')
+    print(f'loaded {len(am_train)} target train samples and {len(am_dev)} target test samples')
     test_split_lengths.append(('am_dev', len(am_dev)))
 
     gc.collect()
@@ -182,7 +184,7 @@ def main():
     if args.use_en_train or args.translate_en_to_lang or args.freeze_head or args.lm_zero_shot:
 
         en_train, en_test = get_source_data(args, dev=True)
-        print(f'loaded {len(en_train)} target train samples and {len(en_test)} target test samples')
+        print(f'loaded {len(en_train)} source train samples and {len(en_test)} source test samples')
         if args.freeze_head or args.lm_zero_shot:
             # train an en model, and save it somewhere. Supports frozen classification heads or LMs
             en_freeze_train = en_train.apply(encode_batch, axis=1).reset_index()[0]
@@ -191,7 +193,7 @@ def main():
             
             freeze_model = make_model(args, 
                 lm_adapter=args.lm_zero_shot and args.lm_zero_src_lm_adapter)
-
+            print('training source model')
             freeze_trainer = AdapterTrainer(
                 model=freeze_model,
                 args=training_args,

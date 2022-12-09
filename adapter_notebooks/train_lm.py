@@ -26,7 +26,8 @@ def train_wiki_lm_and_save(
         num_train_epochs=args.lm_epochs, report_to="all", 
         gradient_accumulation_steps=args.lm_gradient_accumulation_steps,
         per_device_train_batch_size=args.lm_per_device_batch_size, 
-        per_device_eval_batch_size=args.lm_per_device_batch_size)
+        per_device_eval_batch_size=args.lm_per_device_batch_size,
+        seed=args.seed)
 
     raw_datasets = load_dataset(
         "wikipedia", language=language_code, date=date, beam_runner='DirectRunner'

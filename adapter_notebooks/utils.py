@@ -63,6 +63,7 @@ def make_model(args,
     task_name="sa"):
 
     if lm:
+        print('loading lm adapter')
         model = AutoModelForMaskedLM.from_pretrained(args.base_model)
         adapter_config = AdapterConfig.load(args.adapter_type)
         model.add_adapter(task_name, config=adapter_config)
@@ -82,26 +83,31 @@ def make_model(args,
 
     if add_head:
         if load_head:
+            print('loading head', load_head)
             model.load_head(load_head)
             if freeze_head:
+                print('freezing head params')
                 for p in model.heads[task_name].parameters():
                     p.requires_grad = False
                     p.train = False
         else:
+            print('adding new classification head')
             model.add_classification_head(task_name, num_labels=3)
 
     if lm_adapter:
             
         if args.finetune_style == 'stack':
+            print('stacking adapters')
             slot_in_adapter(args, model, lm_adapter, task_name)
         if args.finetune_style == 'load':
+            print('loading adapter')
             model.delete_adapter(task_name)
             loaded = model.add_adapter(lm_adapter, 
             config=AdapterConfig.load(args.adapter_type, reduction_factor=2))
             model.train_adapter(loaded)
             model.set_active_adapters(loaded)
     elif parallel is not None:
-
+        print('loading parallel adapters')
         src_adapter, tgt_adapter = parallel
         src_adapter = model.load_adapter(src_adapter, config=adapter_config)
         tgt_adapter = model.load_adapter(tgt_adapter, config=adapter_config)
@@ -110,6 +116,7 @@ def make_model(args,
             Stack(src_adapter, task_name), 
             Stack(tgt_adapter, task_name))
     elif stack is not None:
+        print('stacking adapters')
         first, second = stack
         model.delete_adapter(task_name)
         first = model.load_adapter(first, config=adapter_config)
