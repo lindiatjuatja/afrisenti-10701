@@ -15,10 +15,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--lang_code",
                         default='am',
                         type=str,
-                        help="Valid codes: 'am', 'dz', 'ha', 'ig', 'ma', 'pcm', 'pt', 'sw', 'yo'")
+                        help="TRAINED on this data, evaluated on all. Valid codes: 'am', 'dz', 'ha', 'ig', 'ma', 'pcm', 'pt', 'sw', 'yo'")
 parser.add_argument("--use_en", 
                         action="store_true",
                         help="Enable to use english data for zero shot rather than the original language codes")
+parser.add_argument("--seed",
+                        default=42069,
+                        type=int,
+                        help="Random seed")
 
 args = parser.parse_args()
 
@@ -76,7 +80,7 @@ TASK = 'SubtaskA'
 # MODEL_NAME_OR_PATH = 'Davlan/afro-xlmr-mini'
 MODEL_NAME_OR_PATH = 'xlm-roberta-base'
 BATCH_SIZE = 16
-GRADIENT_ACCUMULATION_STEPS = 2
+GRADIENT_ACCUMULATION_STEPS = 1
 LEARNING_RATE = 5e-5
 NUMBER_OF_TRAINING_EPOCHS = 5
 MAXIMUM_SEQUENCE_LENGTH = 128
@@ -144,8 +148,9 @@ from datasets import Features, Value, ClassLabel, load_dataset, Dataset
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")
 
-np.random.seed(69)
-torch.manual_seed(420);
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+set_seed(args.seed)
 
 
 # In[7]:
@@ -191,7 +196,6 @@ LANGUAGE_CODE
 
 
 # Set seed before initializing model.
-set_seed(42069)
 
 
 
@@ -226,16 +230,10 @@ else:
     # Labels
     num_labels = len(label_list)
     print(label_list)
-    
-    lang_trains = []
-    for lang in languages:
-        if lang != LANGUAGE_CODE:
-            
-            lang_data_dir = os.path.join(TRAINING_DATA_DIR, 'splitted-train-dev-test', lang)
-            print('Adding', lang, 'to the training set')
-            lang_trains.append(pd.read_csv(lang_data_dir + '/train.tsv', sep='\t'))
-    df = pd.concat(lang_trains)
+
+    df = pd.read_csv(DATA_DIR + '/train.tsv', sep='\t')
     df = df.dropna()
+    eval_dataset = Dataset.from_pandas(df)
     train_dataset = Dataset.from_pandas(df)
     print('train data:', train_dataset)
 
@@ -378,7 +376,7 @@ trainer = Trainer(
     tokenizer=tokenizer,
     data_collator=data_collator,
 )
-trainer.remove_callback(ProgressCallback)
+# trainer.remove_callback(ProgressCallback)
 # Training
 
 train_result = trainer.train(resume_from_checkpoint=None)
