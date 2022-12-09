@@ -257,8 +257,7 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
                         best_losses['test_balanced_accuracy'] = balanced_accuracy_score(test_ans, test_preds)
                         best_losses['test_f1'] = f1_score(test_ans, test_preds, average='weighted')
                         
-                        if args.save_da_adapter:
-                            G.model.save_adapter(args.tmp_folder + 'da/', 'da')
+                        G.model.save_adapter(args.tmp_folder + 'da/', 'da')
 
 
                 pbar.set_description(f" Epoch {epoch} | tr {total_loss / idx:.3f}" + \

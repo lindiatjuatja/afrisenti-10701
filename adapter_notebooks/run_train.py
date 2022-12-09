@@ -39,8 +39,8 @@ def main():
                             help="Folder in which to save temporary components")
     parser.add_argument("--show_bar", action="store_true")
 
-    parser.add_argument("--use_en_train", action="store_true",
-                            help="Whether to use the English dataset (in English) for training")
+    parser.add_argument("--use_source_train", action="store_true",
+                            help="Whether to use the source dataset (default English) for training")
     parser.add_argument("--translate_en_to_lang", action="store_true",
                             help="Whether to use the English dataset auto translated into the lang_code variable for training (only for single task)")
     parser.add_argument("--freeze_head", action="store_true",
@@ -177,11 +177,11 @@ def main():
 
     combined_train, combined_test = [am_train], [am_dev]
     print(f'loaded {len(am_train)} target train samples and {len(am_dev)} target test samples')
-    test_split_lengths.append(('am_dev', len(am_dev)))
+    test_split_lengths.append((f'{args.lang_code}_dev', len(am_dev)))
 
     gc.collect()
 
-    if args.use_en_train or args.translate_en_to_lang or args.freeze_head or args.lm_zero_shot:
+    if args.use_source_train or args.translate_en_to_lang or args.freeze_head or args.lm_zero_shot:
 
         en_train, en_test = get_source_data(args, dev=True)
         print(f'loaded {len(en_train)} source train samples and {len(en_test)} source test samples')
@@ -210,7 +210,8 @@ def main():
             print('\n', '='*50, '\n')
 
             if args.lm_zero_shot:
-                slot_in_adapter(args, freeze_model, args.lm_zero_tgt_lm_adapter)
+                print('slotting in adapter for zero shot')
+                stacked = slot_in_adapter(args, freeze_model, args.lm_zero_tgt_lm_adapter)
                 eval_trainer = AdapterTrainer(
                     model=freeze_model,
                     args=training_args,
@@ -233,7 +234,7 @@ def main():
             del freeze_trainer
             gc.collect()
 
-        elif args.use_en_train or args.translate_en_to_lang:
+        elif args.use_source_train or args.translate_en_to_lang:
             combined_train.append(en_train)
             combined_test.append(en_test)
             test_split_lengths.append(('en_test', len(en_test)))

@@ -49,7 +49,9 @@ def get_source_data(args, dev=True):
 
 def slot_in_adapter(args, model, adapter_loc, task_name='sa'):
     adapter = model.load_adapter(adapter_loc, config=AdapterConfig.load(args.adapter_type, reduction_factor=2))
-    model.active_adapters = Stack(adapter, task_name)
+    stacked = Stack(adapter, task_name)
+    model.active_adapters = stacked
+    return stacked
 
 
 def make_model(args, 
