@@ -13,3 +13,4 @@ adapter-transformers
 pytorch-adapt
 apache_beam 
 mwparserfromhell
+tensorboard

@@ -56,7 +56,7 @@ def main():
                             help="Hidden layer size for classifier")
     parser.add_argument("--da_Dh", default=256, type=int,
                             help="Hidden layer size for discriminator")
-    parser.add_argument("--da_lr", default=1e-3, type=float,
+    parser.add_argument("--da_lr", default=1e-4, type=float,
                             help="Learning rate for discrimintor and classifier")
     parser.add_argument("--finetune_style", default='stack', type=str,
                             help="How to fine-tune after training LM or DA. Options: stack, load, False")
@@ -129,6 +129,8 @@ def main():
     id2label = {0:"positive", 1:"neutral", 2:'negative'}
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
+
+    use_model = None
 
     def encode_batch(row):
         if type(row.text) != str:
@@ -221,6 +223,8 @@ def main():
                 if not args.show_bar:
                     eval_trainer.remove_callback(ProgressCallback)
                 print(f'Zero Shot performance on {args.lang_code}:')
+
+                use_model = freeze_model
                 
                 for key, value in eval_trainer.evaluate().items():
                     print(key, ':', value)
@@ -259,7 +263,9 @@ def main():
 
     print(f"{len(train)} training samples, {len(test)} test samples")
 
-    if args.train_lm and args.train_da:
+    if use_model is not None:
+        model = use_model
+    elif args.train_lm and args.train_da:
         model = make_model(args, 
                 stack=(args.lm_zero_tgt_lm_adapter, da_loc),
                 load_head=args.tmp_folder+'head' if args.freeze_head else None,
