@@ -1,4 +1,4 @@
-def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
+def run_da_experiment(args, encode_batch, parallel, train_lm, src_lm, tgt_lm):
     import pandas as pd
     import torch
     import numpy as np
@@ -11,6 +11,12 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
     import gc
     import copy
     from utils import get_source_data, get_target_data, make_model
+    from transformers import (
+        AutoModelForMaskedLM,
+        AutoAdapterModel,
+    )
+    from transformers.adapters.configuration import AdapterConfig
+    from transformers.adapters.composition import Stack, Parallel
 
 
     import warnings
@@ -19,16 +25,20 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print('Using device:', device)
 
-    en_train = get_source_data(args, dev=False)
+    en_train, en_dev = get_source_data(args, dev=True)
     am_train, am_dev, am_test = get_target_data(args, test=True)
 
+    print(f'Source train size: {len(en_train)},     dev size: {len(en_dev)}')
+    print(f'Target train size: {len(am_train)},     dev size: {len(am_dev)},      test size: {len(am_test)}')
+
     en_train['domain'] = 0
+    en_dev['domain'] = 0
     for am in [am_train, am_dev, am_test]:
         am['domain'] = 1
 
     def adapt_encode(row, src=0):
         out = encode_batch(row)
-        if train_lm:
+        if parallel:
             if src==1:
                 return {
                     'imgs': torch.vstack([out['input_ids'], out['attention_mask'], torch.ones_like(out['attention_mask'])]),
@@ -48,6 +58,7 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
         }
 
     en_train = en_train.apply(lambda x: adapt_encode(x, src=1), axis=1)
+    en_dev = en_dev.apply(lambda x: adapt_encode(x, src=1), axis=1)
                             
     am_train = am_train.apply(adapt_encode, axis=1)
     am_dev = am_dev.apply(adapt_encode, axis=1)
@@ -91,54 +102,86 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
                 'target_domain': tgt['domain'].to(device),
             }
 
-    train_data = SimpleSourceAndTargetDataset(en_train, am_train)
+    source_train_data = SimpleSourceAndTargetDataset(en_train, am_train)
+    source_valid_data = SimpleTargetDataset(en_dev)
+    train_data = SimpleTargetDataset(am_train)
     valid_data = SimpleTargetDataset(am_dev)
     test_data = SimpleTargetDataset(am_test)
 
     class Generator(nn.Module):
         def __init__(self, ):
             super().__init__()
-            self.model = make_model(args, add_head=False, task_name='da')
+            # self.model = make_model(args, add_head=False, task_name='da')
 
-        def forward(self, x):
-            a = self.model(x[:, 0], x[:, 1]).pooler_output
-            return a
-
-    class LMGenerator(nn.Module):
-        def __init__(self, ):
-            super().__init__()
-            self.model = make_model(args, add_head=False, task_name='da', parallel=(src_lm, tgt_lm))
-        
-        def forward(self, x):
-            if x.shape[1] == 3:
-                # source
-                a = self.model(x[:, 0], x[:, 1])[0].pooler_output
+            adapter_config = AdapterConfig.load(args.adapter_type)
+            if train_lm and parallel:
+                lang_adapter_config = AdapterConfig.load(args.adapter_type, reduction_factor=2)
+                self.model = AutoAdapterModel.from_pretrained(args.base_model)
+                src_adapter = self.model.load_adapter(args.lm_zero_src_lm_adapter, config=lang_adapter_config)
+                tgt_adapter = self.model.load_adapter(args.lm_zero_tgt_lm_adapter, config=lang_adapter_config)
+                self.model.add_adapter('sa', config=adapter_config)
+                self.model.train_adapter(['sa'])
+                self.model.active_adapters = Parallel(
+                    Stack(src_adapter, 'sa'), 
+                    Stack(tgt_adapter, 'sa'))
+            elif parallel:
+                self.model = AutoAdapterModel.from_pretrained(args.base_model)
+                self.model.add_adapter('sa_src', config=adapter_config)
+                self.model.add_adapter('sa_tgt', config=adapter_config)
+                self.model.train_adapter(['sa_src', 'sa_tgt'])
+                self.model.active_adapters = Parallel('sa_src', 'sa_tgt')
+            elif train_lm:
+                lang_adapter_config = AdapterConfig.load(args.adapter_type, reduction_factor=2)
+                self.model = AutoAdapterModel.from_pretrained(args.base_model)
+                src_adapter = self.model.load_adapter(args.lm_zero_src_lm_adapter, config=lang_adapter_config)
+                tgt_adapter = self.model.load_adapter(args.lm_zero_tgt_lm_adapter, config=lang_adapter_config)
+                self.model.add_adapter('sa', config=adapter_config)
+                self.model.train_adapter(['sa'])
+                self.model.active_adapters = Stack(tgt_adapter, "sa")
             else:
-                # target
-                a = self.model(x[:, 0], x[:, 1])[1].pooler_output
+                model = AutoAdapterModel.from_pretrained(args.base_model)
+                model.add_adapter('sa', config=adapter_config)
+                model.train_adapter(['sa'])
+                model.set_active_adapters('sa')
+            
+            self.project = nn.Sequential(
+                nn.Linear(768, 768),
+                nn.BatchNorm1d(768),
+                nn.ReLU(),
+                nn.Linear(768, args.da_repr)
+            )
+
+        def forward(self, x):
+            if parallel:
+                if x.shape[1] == 3:
+                    a = self.model(x[:, 0], x[:, 1])[0]
+                else:
+                    a = self.model(x[:, 0], x[:, 1])[1]
+            else:
+                a = self.model(x[:, 0], x[:, 1])
+            # a = self.project(a.pooler_output)
+            a = self.project(a['last_hidden_state'][:, 0])
             return a
 
     updates_per_epoch = 4
 
+    source_train_dataloader = torch.utils.data.DataLoader(source_train_data, batch_size=args.per_device_batch_size, shuffle=True)
+    source_valid_dataloader = torch.utils.data.DataLoader(source_valid_data, batch_size=args.per_device_batch_size, shuffle=False)
     train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.per_device_batch_size, shuffle=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=args.per_device_batch_size, shuffle=False)
     test_dataloader = torch.utils.data.DataLoader(test_data, batch_size=args.per_device_batch_size, shuffle=False)
 
+    num_source_batches = len(source_train_dataloader)
     num_batches = len(train_dataloader)
-    num_valid_batches = len(valid_dataloader)
-    num_test_batches = len(test_dataloader)
     
-    if train_lm:
-        G = LMGenerator().to(device) 
-    else:
-        G = Generator().to(device) 
+    G = Generator().to(device) 
 
-    C = Classifier(3, in_size=768, h=args.da_Ch).to(device)
+    C = Classifier(3, in_size=args.da_repr, h=args.da_Ch).to(device)
 
     G_opt = torch.optim.AdamW(G.parameters(), lr=args.lr)
     C_opt = torch.optim.AdamW(C.parameters(), lr=args.da_lr)
 
-    D = Discriminator(in_size=768, h=args.da_Dh).to(device)
+    D = Discriminator(in_size=args.da_repr, h=args.da_Dh).to(device)
     D_opt = torch.optim.AdamW(D.parameters(), lr=args.da_lr)
 
     misc = dict()
@@ -148,7 +191,7 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
         T = copy.deepcopy(G)
         T_opt = torch.optim.AdamW(T.parameters(), lr=args.lr)
         hook = ADDAHook(g_opts=[T_opt], d_opts=[D_opt])
-        models = Models({"G": G, "C": C, "D": D, 'T':T})
+        models = {"G": G, "C": C, "D": D, 'T':T}
 
     elif args.da_method == 'coral':
         from pytorch_adapt.hooks import AlignerPlusCHook
@@ -203,28 +246,124 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
         )
 
         models = {"G": G, "C": C}
+    elif args.da_method == 'none':
+        criterion = nn.CrossEntropyLoss()
+        models = {"G": G, "C": C}
     else:
         assert False, "DA method not supported"
 
     models = Models(models)
     gc.collect()
 
+    update_idxs = set([i * (num_source_batches // updates_per_epoch) 
+        for i in range(1, updates_per_epoch)] + [num_source_batches])
+
+    best_losses = dict()
+    best_valid = -1
+
+    if args.train_da:
+        print("Training DA model")
+        for epoch in range(1, 1+args.da_epochs):
+            total_loss = 0.0 
+
+            pbar = tqdm(source_train_dataloader, desc=f"Epoch {epoch}", leave=args.show_bar)
+            for idx, data in enumerate(pbar, start=1):
+                models.train()
+                if args.da_method == 'none':
+                    
+                    G_opt.zero_grad()
+                    C_opt.zero_grad()
+                    logits = C(G(data['src_imgs']))
+                    loss = criterion(logits, data['src_labels'])
+                    total_loss += loss.item()
+                    loss.backward()
+                    G_opt.step()
+                    C_opt.step()
+                else:
+                    _, loss = hook({**models, **misc, **data})
+                    if args.da_method in ['dann']:
+                        loss = loss['total_loss']
+                    elif args.da_method in ['adda', 'cdan']:
+                        loss = loss['g_loss']
+                    total_loss += loss['total']
+
+                if idx in update_idxs:
+                    
+                    models.eval()
+                    with torch.no_grad():
+                        logits = []
+                        ans = []
+                        for data in source_valid_dataloader:
+                            logits.append(C(G(data["target_imgs"])))
+                            ans.append(data["target_labels"])
+                        source_valid_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
+                        print('\n', source_valid_preds[:20])
+                        source_valid_ans = torch.cat(ans, dim=0).cpu().numpy()
+                        source_valid_bal_acc = balanced_accuracy_score(source_valid_preds, source_valid_ans)
+
+
+                        logits = []
+                        ans = []
+                        for data in valid_dataloader:
+                            logits.append(C(G(data["target_imgs"])))
+                            ans.append(data["target_labels"])
+                        valid_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
+                        valid_ans = torch.cat(ans, dim=0).cpu().numpy()
+                        valid_bal_acc = balanced_accuracy_score(valid_ans, valid_preds)
+                        
+                        if valid_bal_acc > best_valid:
+                            best_valid = valid_bal_acc
+                            best_losses = dict()
+                            
+                            best_losses['dev_balanced_accuracy'] = valid_bal_acc
+                            best_losses['dev_f1'] = f1_score(valid_ans, valid_preds, average='weighted')
+                            
+                            logits = []
+                            ans = []
+                            for data in test_dataloader:
+                                logits.append(C(G(data["target_imgs"])))
+                                ans.append(data["target_labels"])
+                            test_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
+                            test_ans = torch.cat(ans, dim=0).cpu().numpy()
+                            
+                            best_losses['test_balanced_accuracy'] = balanced_accuracy_score(test_ans, test_preds)
+                            best_losses['test_f1'] = f1_score(test_ans, test_preds, average='weighted')
+                            
+                            G.model.save_adapter(args.tmp_folder + 'da/', 'da')
+
+
+                    pbar.set_description(f" Epoch {epoch} | tr {total_loss / idx:.3f} | source valid bal_acc {source_valid_bal_acc:.3f}" + \
+                                        f" | valid bal_acc {valid_bal_acc:.3f} | test bal_acc {best_losses['test_balanced_accuracy']:.3f}" + \
+                                            f" | test f1 {best_losses['test_f1']:.2f}")
+    #                 train_losses.append(total_loss / idx)
+        print("Test results on best validation, zero shot")
+        for key, value in best_losses.items():
+            print(key, ':', value)
+
+
+    print('\n\n\n Finetuning')
+    G_opt = torch.optim.AdamW(G.parameters(), lr=args.da_finetune_lr)
+    C_opt = torch.optim.AdamW(C.parameters(), lr=args.da_finetune_lr)
     update_idxs = set([i * (num_batches // updates_per_epoch) 
         for i in range(1, updates_per_epoch)] + [num_batches])
 
     best_losses = dict()
     best_valid = -1
-
-    print("Training DA model")
-    for epoch in range(1, 1+args.train_epochs):
+    for epoch in range(1, 1+args.da_finetune_epochs):
         total_loss = 0.0 
 
         pbar = tqdm(train_dataloader, desc=f"Epoch {epoch}", leave=args.show_bar)
         for idx, data in enumerate(pbar, start=1):
             models.train()
-            _, loss = hook({**models, **misc, **data})
-            
-            total_loss += loss['total_loss']['total']
+                
+            G_opt.zero_grad()
+            C_opt.zero_grad()
+            logits = C(G(data['src_imgs']))
+            loss = criterion(logits, data['src_labels'])
+            total_loss += loss.item()
+            loss.backward()
+            G_opt.step()
+            C_opt.step()
 
             if idx in update_idxs:
                 
@@ -256,15 +395,9 @@ def run_da_experiment(args, encode_batch, train_lm, src_lm, tgt_lm):
                         
                         best_losses['test_balanced_accuracy'] = balanced_accuracy_score(test_ans, test_preds)
                         best_losses['test_f1'] = f1_score(test_ans, test_preds, average='weighted')
-                        
-                        G.model.save_adapter(args.tmp_folder + 'da/', 'da')
 
 
-                pbar.set_description(f" Epoch {epoch} | tr {total_loss / idx:.3f}" + \
-                                    f" | valid bal_acc {valid_bal_acc:.2f} | test bal_acc {best_losses['test_balanced_accuracy']:.2f}" + \
+                pbar.set_description(f" Epoch {epoch} | tr {total_loss / idx:.3f} | source valid bal_acc {source_valid_bal_acc:.3f}" + \
+                                    f" | valid bal_acc {valid_bal_acc:.3f} | test bal_acc {best_losses['test_balanced_accuracy']:.3f}" + \
                                         f" | test f1 {best_losses['test_f1']:.2f}")
-#                 train_losses.append(total_loss / idx)
-    print("Test results on best validation, zero shot")
-    for key, value in best_losses.items():
-        print(key, ':', value)
     return args.tmp_folder + 'da/'

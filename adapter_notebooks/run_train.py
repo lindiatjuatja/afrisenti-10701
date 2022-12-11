@@ -48,18 +48,31 @@ def main():
     parser.add_argument("--translate_low_resource", action="store_true",
                             help="Use the low resource language translated into English")
 
+    parser.add_argument("--vanilla_train", action="store_true",
+                            help="Train using standard script rather than Trainer. Uses finetune learning rate and epochs")
     parser.add_argument("--train_da", action="store_true",
                             help="Use an unsupervised domain adaptation method")
     parser.add_argument("--da_method", default='dann', type=str,
-                            help="Which unsupervised domain adaptation method to use. Supports dann, adda, cdan, coral, dc (Domain Confusion), gan, itl")
+                            help="Which unsupervised domain adaptation method to use. Supports dann, adda, cdan, coral, dc (Domain Confusion), gan, itl, none")
+    parser.add_argument("--da_epochs", default=20, type=int,
+                            help="Hidden layer size for classifier")
     parser.add_argument("--da_Ch", default=256, type=int,
                             help="Hidden layer size for classifier")
     parser.add_argument("--da_Dh", default=256, type=int,
                             help="Hidden layer size for discriminator")
     parser.add_argument("--da_lr", default=1e-4, type=float,
                             help="Learning rate for discrimintor and classifier")
-    parser.add_argument("--finetune_style", default='stack', type=str,
-                            help="How to fine-tune after training LM or DA. Options: stack, load, False")
+    parser.add_argument("--da_parallel", action="store_true",
+                            help="Use parallel adapters for data types in DA")
+    parser.add_argument("--da_repr", default=768, type=int,
+                            help="Size of representation for domain adaptation methods")
+    parser.add_argument("--da_finetune", action="store_true",
+                            help="Fine tune after DA")
+    parser.add_argument("--da_finetune_lr", default=1e-5, type=float,
+                            help="Learning rate for finetuning")
+    parser.add_argument("--da_finetune_epochs", default=10, type=int,
+                            help="Epochs for finetuning")
+
 
     parser.add_argument("--train_lm", action="store_true",
                             help="Train an LM using Wikipedia data")
@@ -72,7 +85,7 @@ def main():
                             help='language code and date for wikipedia dataset for source: i.e. --lm_src_data sw 20221120')
     parser.add_argument("--lm_tgt_data", nargs=2, default=('am', '20221120'),
                             help='language code and date for wikipedia dataset for target: i.e. --lm_src_data am 20221120')
-    parser.add_argument("--lm_lr", default=1e-4, type=float,
+    parser.add_argument("--lm_lr", default=1e-5, type=float,
                             help="Learning rate for LM adapter training")
     parser.add_argument("--lm_epochs", default=10, type=int,
                             help="Epochs for LM adapter training")
@@ -140,13 +153,10 @@ def main():
         out['labels'] = torch.LongTensor([label2id[row.labels]])[0]
         return out
 
-    if args.train_da:
-        da_loc = run_da_experiment(args, encode_batch, args.train_lm,
+    if args.train_da or args.vanilla_train:
+        da_loc = run_da_experiment(args, encode_batch, args.da_parallel, args.train_lm,
         args.lm_zero_src_lm_adapter, args.lm_zero_tgt_lm_adapter)
-
-        args.load_adapter = da_loc
-        if args.finetune_style not in ['stack', 'load']:
-            return
+        return
     
     training_args = TrainingArguments(
         args.tmp_folder,
@@ -193,19 +203,42 @@ def main():
             en_freeze_test = en_test.apply(encode_batch, axis=1).reset_index()[0]
 
             
-            freeze_model = make_model(args, 
-                lm_adapter=args.lm_zero_shot and args.lm_zero_src_lm_adapter)
+            # freeze_model = make_model(args, 
+            #     lm_adapter=args.lm_zero_shot and args.lm_zero_src_lm_adapter)
+
+            
+            if args.lm_zero_shot:
+                lang_adapter_config = AdapterConfig.load(args.adapter_type, reduction_factor=2)
+                adapter_config = AdapterConfig.load(args.adapter_type)
+                model = AutoAdapterModel.from_pretrained(args.base_model)
+                src_adapter = model.load_adapter(args.lm_zero_src_lm_adapter, config=lang_adapter_config)
+                tgt_adapter = model.load_adapter(args.lm_zero_tgt_lm_adapter, config=lang_adapter_config)
+                model.add_adapter('sa', config=adapter_config)
+                model.add_classification_head('sa', num_labels=3)
+                model.train_adapter(['sa'])
+                model.active_adapters = Stack(src_adapter, "sa")
+            else:
+                adapter_config = AdapterConfig.load(args.adapter_type)
+                model = AutoAdapterModel.from_pretrained(args.base_model)
+                model.add_adapter('sa', config=adapter_config)
+                model.add_classification_head('sa', num_labels=3)
+                model.train_adapter(['sa'])
+                model.set_active_adapters('sa')
+
+
             print('training source model')
             freeze_trainer = AdapterTrainer(
-                model=freeze_model,
+                model=model,
                 args=training_args,
                 train_dataset=en_freeze_train,
                 eval_dataset=en_freeze_test,
                 compute_metrics=lambda p: compute_scores(p, [('en_test', len(en_freeze_test))]),
             )
+
             if not args.show_bar:
                 freeze_trainer.remove_callback(ProgressCallback)
             freeze_trainer.train()
+
             print('Source performance')
             for key,value in freeze_trainer.evaluate().items():
                 print(key, ':', value)
@@ -213,9 +246,9 @@ def main():
 
             if args.lm_zero_shot:
                 print('slotting in adapter for zero shot')
-                stacked = slot_in_adapter(args, freeze_model, args.lm_zero_tgt_lm_adapter)
+                model.active_adapters = Stack(tgt_adapter, "sa")
                 eval_trainer = AdapterTrainer(
-                    model=freeze_model,
+                    model=model,
                     args=training_args,
                     eval_dataset=combined_test[0].apply(encode_batch, axis=1).reset_index()[0],
                     compute_metrics=compute_scores
@@ -223,18 +256,21 @@ def main():
                 if not args.show_bar:
                     eval_trainer.remove_callback(ProgressCallback)
                 print(f'Zero Shot performance on {args.lang_code}:')
-
-                use_model = freeze_model
                 
                 for key, value in eval_trainer.evaluate().items():
                     print(key, ':', value)
                 print('\n', '='*50, '\n')
 
-            freeze_model.save_head(args.tmp_folder+'head', 'sa')
+            if args.freeze_head:
+                print('freezing head params')
+                for p in model.heads['sa'].parameters():
+                    p.requires_grad = False
+                    p.train = False
+
+            model.save_head(args.tmp_folder+'head', 'sa')
 
             del en_freeze_train
             del en_freeze_test
-            del freeze_model
             del freeze_trainer
             gc.collect()
 
@@ -263,23 +299,31 @@ def main():
 
     print(f"{len(train)} training samples, {len(test)} test samples")
 
-    if use_model is not None:
-        model = use_model
-    elif args.train_lm and args.train_da:
-        model = make_model(args, 
-                stack=(args.lm_zero_tgt_lm_adapter, da_loc),
-                load_head=args.tmp_folder+'head' if args.freeze_head else None,
-                freeze_head=args.freeze_head)
+    if (args.lm_zero_shot):
+        # model should be prepared from before
+        pass
+    elif args.train_lm:
+        lang_adapter_config = AdapterConfig.load(args.adapter_type, reduction_factor=2)
+        adapter_config = AdapterConfig.load(args.adapter_type)
+        model = AutoAdapterModel.from_pretrained(args.base_model)
+        tgt_adapter = model.load_adapter(args.lm_zero_tgt_lm_adapter, config=lang_adapter_config)
+        model.add_adapter('sa', config=adapter_config)
+        model.add_classification_head('sa', num_labels=3)
+        model.train_adapter(['sa'])
+        model.active_adapters = Stack(tgt_adapter, "sa")
+    elif args.freeze_head:
+        adapter_config = AdapterConfig.load(args.adapter_type)
+        model.delete_adapter('sa')
+        model.add_adapter('sa', config=adapter_config)
+        model.train_adapter(['sa'])
+        model.set_active_adapters('sa')
     else:
-        lm_adapter = None
-        if args.train_lm:
-            lm_adapter = args.lm_zero_tgt_lm_adapter
-        elif args.train_da:
-            lm_adapter = da_loc
-        model = make_model(args, 
-                lm_adapter=lm_adapter,
-                load_head=args.tmp_folder+'head' if args.freeze_head else None,
-                freeze_head=args.freeze_head)
+        adapter_config = AdapterConfig.load(args.adapter_type)
+        model = AutoAdapterModel.from_pretrained(args.base_model)
+        model.add_adapter('sa', config=adapter_config)
+        model.add_classification_head('sa', num_labels=3)
+        model.train_adapter(['sa'])
+        model.set_active_adapters('sa')
 
     trainer = AdapterTrainer(
         model=model,

@@ -6,6 +6,9 @@ from transformers import (
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     TrainingArguments,
+    AutoModelForMaskedLM,
+    AutoAdapterModel,
+    AdapterConfig
 )
 from transformers.trainer_callback import ProgressCallback
 import math
@@ -27,6 +30,7 @@ def train_wiki_lm_and_save(
         gradient_accumulation_steps=args.lm_gradient_accumulation_steps,
         per_device_train_batch_size=args.lm_per_device_batch_size, 
         per_device_eval_batch_size=args.lm_per_device_batch_size,
+        save_steps=-1,
         seed=args.seed)
 
     raw_datasets = load_dataset(
@@ -44,7 +48,13 @@ def train_wiki_lm_and_save(
     print(f'LM Train size: {len(raw_datasets["train"])}, LM Val size: {len(raw_datasets["validation"])}')
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
 
-    model = make_model(args, lm=True, task_name=task_name)
+    # model = make_model(args, lm=True, task_name=task_name)
+
+    model = AutoModelForMaskedLM.from_pretrained(args.base_model)
+    adapter_config = AdapterConfig.load(args.adapter_type)
+    model.add_adapter(task_name, config=adapter_config)
+    model.train_adapter([task_name])
+    model.set_active_adapters(task_name)
 
     column_names = raw_datasets["train"].column_names
     text_column_name = "text"
