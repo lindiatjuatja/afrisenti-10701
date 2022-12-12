@@ -50,25 +50,27 @@ def main():
 
     parser.add_argument("--vanilla_train", action="store_true",
                             help="Train using standard script rather than Trainer. Uses finetune learning rate and epochs")
+    parser.add_argument("--da_test_all", action="store_true",
+                        help="Test on all languages")
     parser.add_argument("--train_da", action="store_true",
                             help="Use an unsupervised domain adaptation method")
     parser.add_argument("--da_method", default='dann', type=str,
                             help="Which unsupervised domain adaptation method to use. Supports dann, adda, cdan, coral, dc (Domain Confusion), gan, itl, none")
-    parser.add_argument("--da_epochs", default=20, type=int,
+    parser.add_argument("--da_epochs", default=15, type=int,
                             help="Hidden layer size for classifier")
     parser.add_argument("--da_Ch", default=256, type=int,
                             help="Hidden layer size for classifier")
     parser.add_argument("--da_Dh", default=256, type=int,
                             help="Hidden layer size for discriminator")
-    parser.add_argument("--da_lr", default=1e-4, type=float,
+    parser.add_argument("--da_lr", default=3e-5, type=float,
                             help="Learning rate for discrimintor and classifier")
     parser.add_argument("--da_parallel", action="store_true",
                             help="Use parallel adapters for data types in DA")
-    parser.add_argument("--da_repr", default=768, type=int,
+    parser.add_argument("--da_repr", default=500, type=int,
                             help="Size of representation for domain adaptation methods")
     parser.add_argument("--da_finetune", action="store_true",
                             help="Fine tune after DA")
-    parser.add_argument("--da_finetune_lr", default=1e-5, type=float,
+    parser.add_argument("--da_finetune_lr", default=5e-5, type=float,
                             help="Learning rate for finetuning")
     parser.add_argument("--da_finetune_epochs", default=10, type=int,
                             help="Epochs for finetuning")
@@ -104,6 +106,8 @@ def main():
     #                         help="location of an additional adapter for use in the model. cannot be used with LM.")
     parser.add_argument("--lr", default=1e-5, type=float,
                             help="Learning rate for adapter training")
+    parser.add_argument("--oversample", action="store_true",
+                            help="Oversample unbalanced classes")
     parser.add_argument("--train_epochs", default=14, type=int,
                             help="Epochs for adapter training")
     parser.add_argument("--per_device_batch_size", default=16, type=int,
@@ -149,7 +153,7 @@ def main():
         if type(row.text) != str:
             return -1
         text = ' '.join(filter(lambda x:x[0]!='@', row.text.split()))
-        out = tokenizer(text, max_length=100, truncation=True, padding="max_length", return_tensors='pt')
+        out = tokenizer(text, max_length=128, truncation=True, padding="max_length", return_tensors='pt')
         out['labels'] = torch.LongTensor([label2id[row.labels]])[0]
         return out
 

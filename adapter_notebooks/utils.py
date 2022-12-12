@@ -11,11 +11,21 @@ from transformers.adapters.composition import Stack, Parallel
 train_file = 'data/multilingual_combined.csv'
 en_file = 'data/en_all.csv'
 
-def get_target_data(args, test=False):
+def oversample(df):
+    size = df['labels'].value_counts().max()
+    dfs = [df]
+    for i, group in df.groupby('labels'):
+        dfs.append(group.sample(size-len(group), replace=True))
+    return pd.concat(dfs)
+
+def get_target_data(args, test=False, lang_code=None):
     am_train = pd.read_csv(train_file)
 
-    if args.lang_code != 'all':
-        am_train = am_train[am_train.tag == args.lang_code]
+    if lang_code is None:
+        lang_code = args.lang_code
+
+    if lang_code != 'all':
+        am_train = am_train[am_train.tag == lang_code]
 
     if args.translate_low_resource:
         am_train['text'] = am_train['en_translated']
@@ -23,10 +33,16 @@ def get_target_data(args, test=False):
     am_train = am_train[['text', 'labels', 'tag']]
 
     if test:
-        return np.split(am_train.sample(frac=1, random_state=42),
+        train, dev, test = np.split(am_train.sample(frac=1, random_state=42),
          [int(.7*len(am_train)), int(.8*len(am_train))])
+        if args.oversample:
+            train = oversample(train)
+        return train.sample(frac=1, random_state=42), dev, test
     else:
-        return np.split(am_train.sample(frac=1, random_state=42), [int(.7*len(am_train))])
+        train, test = np.split(am_train.sample(frac=1, random_state=42), [int(.7*len(am_train))])
+        if args.oversample:
+            train = oversample(train)
+        return train.sample(frac=1, random_state=42), test
 
 def get_source_data(args, dev=True):
     if args.source_lang_code == 'en':
@@ -44,7 +60,12 @@ def get_source_data(args, dev=True):
     en_train = en_train[['text', 'labels', 'tag']]
 
     if dev:
-        return np.split(en_train.sample(frac=1, random_state=42), [int(.8*len(en_train))])
+        train, dev = np.split(en_train.sample(frac=1, random_state=42), [int(.8*len(en_train))])
+        if args.oversample:
+            train = oversample(train)
+        return train.sample(frac=1, random_state=42), dev
+    if args.oversample:
+        en_train = oversample(en_train)
     return en_train.sample(frac=1, random_state=42)
 
 def slot_in_adapter(args, model, adapter_loc, task_name='sa'):
