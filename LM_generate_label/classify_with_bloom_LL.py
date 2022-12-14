@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import torch
 import os
-from transformers import AutoTokenizer, AutoModelForMaskedLM
+from transformers import BloomTokenizerFast, BloomForCausalLM
 from tqdm import tqdm
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -125,8 +125,8 @@ def main():
     if not os.path.isdir(EXP_DIR):
         os.makedirs(EXP_DIR)
     
-    tokenizer = AutoTokenizer.from_pretrained("bonadossou/afrolm_active_learning")
-    model = AutoModelForMaskedLM.from_pretrained("bonadossou/afrolm_active_learning")      
+    tokenizer = BloomTokenizerFast.from_pretrained("bigscience/bloom-7b1", cache_dir=cache_path)
+    model = BloomForCausalLM.from_pretrained("bigscience/bloom-7b1", cache_dir=cache_path, torch_dtype="auto", device_map="auto")    
 
     train_df = format_data(os.path.join(LANG_DIR, 'train.tsv'))
     dev_df = format_data(os.path.join(LANG_DIR, 'dev.tsv'))
