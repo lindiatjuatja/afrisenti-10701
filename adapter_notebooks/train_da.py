@@ -11,9 +11,8 @@ def run_da_experiment(args, encode_batch, parallel, train_lm, src_lm, tgt_lm):
     from torch import nn
     import gc
     import copy
-    from utils import get_source_data, get_target_data, make_model
+    from utils import get_source_data, get_target_data
     from transformers import (
-        AutoModelForMaskedLM,
         AutoAdapterModel,
     )
     from transformers.adapters.configuration import AdapterConfig
@@ -275,9 +274,9 @@ def run_da_experiment(args, encode_batch, parallel, train_lm, src_lm, tgt_lm):
     save_path = args.tmp_folder + 'saved_model/'
     if not os.path.exists(save_path):
         os.mkdir(save_path)
-
     if args.train_da:
         print("Training DA model")
+        saves = []
         for epoch in range(1, 1+args.da_epochs):
             total_loss = 0.0 
 
@@ -313,7 +312,8 @@ def run_da_experiment(args, encode_batch, parallel, train_lm, src_lm, tgt_lm):
                             ans.append(data["target_labels"])
                         source_valid_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
                         source_valid_ans = torch.cat(ans, dim=0).cpu().numpy()
-                        source_valid_bal_acc = balanced_accuracy_score(source_valid_preds, source_valid_ans)
+                        source_valid_f1= f1_score(source_valid_ans, source_valid_preds, average='weighted')
+                        source_valid_bal_acc = balanced_accuracy_score(source_valid_ans, source_valid_preds)
 
 
                         logits = []
@@ -323,10 +323,19 @@ def run_da_experiment(args, encode_batch, parallel, train_lm, src_lm, tgt_lm):
                             ans.append(data["target_labels"])
                         valid_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
                         valid_ans = torch.cat(ans, dim=0).cpu().numpy()
+                        valid_f1= f1_score(valid_ans, valid_preds, average='weighted')
                         valid_bal_acc = balanced_accuracy_score(valid_ans, valid_preds)
+
+                        saves.append([epoch, idx, 
+                        loss['src_domain_loss'], 
+                        loss['target_domain_loss'],
+                        loss['c_loss'],
+                        loss['total'],
+                        source_valid_f1, valid_f1
+                        ])
                         
-                        if valid_bal_acc > best_valid:
-                            best_valid = valid_bal_acc
+                        if valid_f1 > best_valid:
+                            best_valid = valid_f1
                             best_losses = dict()
                             
                             best_losses['dev_balanced_accuracy'] = valid_bal_acc
@@ -356,6 +365,10 @@ def run_da_experiment(args, encode_batch, parallel, train_lm, src_lm, tgt_lm):
                                         f" | valid bal_acc {valid_bal_acc:.3f} | test bal_acc {best_losses['test_balanced_accuracy']:.3f}" + \
                                             f" | test f1 {best_losses['test_f1']:.3f}")
     #                 train_losses.append(total_loss / idx)
+        if args.da_save_losses:
+            saved_data = pd.DataFrame(saves, columns=['epoch', 'idx', 'src_domain_loss', 'target_domain_loss', 'c_loss', 'total', 'source_f1', 'target_f1'])
+            saved_data.to_csv(f'{args.source_lang_code}_{args.lang_code}_da.csv', index=False)
+
         print("\n\nTest results on best validation, zero shot")
         for key, value in best_losses.items():
             print(key, ':', value)
@@ -423,9 +436,10 @@ def run_da_experiment(args, encode_batch, parallel, train_lm, src_lm, tgt_lm):
                         valid_preds = torch.cat(logits, dim=0).argmax(-1).cpu().numpy()
                         valid_ans = torch.cat(ans, dim=0).cpu().numpy()
                         valid_bal_acc = balanced_accuracy_score(valid_ans, valid_preds)
+                        valid_f1= f1_score(valid_ans, valid_preds, average='weighted')
                         
-                        if valid_bal_acc > best_valid:
-                            best_valid = valid_bal_acc
+                        if valid_f1 > best_valid:
+                            best_valid = valid_f1
                             best_losses = dict()
                             
                             best_losses['dev_balanced_accuracy'] = valid_bal_acc

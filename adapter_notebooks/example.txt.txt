@@ -1,0 +1,13 @@
+
+# Joint training, EN and PT on PT dev set
+python run_train.py --lang_code pt --source_lang_code en --use_source_train
+
+# Train a language model on AM, try zero shot using a pretrained Arabic LM adapter using MA data, then fine tune the AM adapter
+python run_train.py --train_lm --lm_zero_shot  --source_lang_code ma --lm_zero_src_lm_adapter ar/wiki@ukp --lang_code am--lm_zero_tgt_lm_adapter train--oversample
+
+
+# Run Zero Shot Domain Adaptation code on Hausa using Swahili as a source language
+python run_train.py --train_da --da_method dann --oversample --da_test_all --source_lang_code sw --lang_code ha  --da_epochs 13
+
+# Run Domain Adaptation code on PCM using Swahili as a source language, then finetune
+python run_train.py --train_da --da_method dann --oversample --da_test_all --source_lang_code sw --lang_code pcm  --da_finetune

@@ -11,17 +11,17 @@
 import argparse
 import os
 
-# parser = argparse.ArgumentParser()
-# parser.add_argument("--lang_code",
-#                         default='am',
-#                         type=str,
-#                         help="Valid codes: 'am', 'dz', 'ha', 'ig', 'ma', 'pcm', 'pt', 'sw', 'yo'")
+parser = argparse.ArgumentParser()
+parser.add_argument("--lang_code",
+                        default='am',
+                        type=str,
+                        help="Valid codes: 'am', 'dz', 'ha', 'ig', 'ma', 'pcm', 'pt', 'sw', 'yo'")
 
-# args = parser.parse_args()
+args = parser.parse_args()
 
-# LANGUAGE_CODE = args.lang_code
+LANGUAGE_CODE = args.lang_code
 
-LANGUAGE_CODE = 'am'
+# LANGUAGE_CODE = 'am'
 
 
 # In[2]:
@@ -241,10 +241,15 @@ def preprocess_function(examples):
         result["label"] = [(label_to_id[l] if l != -1 else -1) for l in examples["label"]]
     
     result['length'], result["tokenized"] = [], []
+    inps = []
     for input_ids in result['input_ids']:
+        if len(input_ids) > MAXIMUM_SEQUENCE_LENGTH:
+            input_ids = input_ids[:MAXIMUM_SEQUENCE_LENGTH-1] + [input_ids[-1]]
+        inps.append(np.array(input_ids, dtype=np.int64))
         toks = tokenizer.convert_ids_to_tokens(input_ids, skip_special_tokens=True)
-        result['length'].append(len(toks)+2)
+        result['length'].append(len(toks))
         result['tokenized'].append(' '.join(toks))
+    result['input_ids'] = inps
     return result
 
 train_dataset = train_dataset.map(
@@ -264,6 +269,12 @@ test_dataset = test_dataset.map(
     batched=True,
     desc="Running tokenizer on validation dataset",
 )
+# print(set([type(d[0]) for d in train_dataset['input_ids']]))
+
+# train_dataset = train_dataset.filter(lambda row: type(row['input_ids']) != np.object_)
+# eval_dataset = eval_dataset.filter(lambda row: type(row['input_ids']) != np.object_)
+# test_dataset = test_dataset.filter(lambda row: type(row['input_ids']) != np.object_)
+
 
 
 # In[13]:
@@ -321,19 +332,25 @@ class LSTM(nn.Module):
 # In[16]:
 
 
+num_pts = len(eval_dataset)
+shuffled_ids = np.arange(num_pts, dtype=int)
+np.random.shuffle(shuffled_ids)
+
+# print(set([len(d) for d in eval_dataset['input_ids']]))
+
+valid_ids = torch.LongTensor(np.array(eval_dataset['input_ids'])[shuffled_ids])
+valid_lengths = torch.LongTensor(np.array(eval_dataset['length'])[shuffled_ids]).cpu()
+valid_labels = torch.LongTensor(np.array(eval_dataset['label'])[shuffled_ids])
+
 num_pts = len(train_dataset)
-# shuffled_ids = np.arange(num_pts, dtype=int)
-# np.random.shuffle(shuffled_ids)
+shuffled_ids = np.arange(num_pts, dtype=int)
+np.random.shuffle(shuffled_ids)
 
-valid_ids = torch.LongTensor(np.array(eval_dataset['input_ids']))
-valid_lengths = torch.LongTensor(np.array(eval_dataset['length'])).cpu()
-valid_labels = torch.LongTensor(np.array(eval_dataset['label']))
+train_ids = torch.LongTensor(np.array(train_dataset['input_ids'])[shuffled_ids])
+train_lengths = torch.LongTensor(np.array(train_dataset['length'])[shuffled_ids]).cpu()
+train_labels = torch.LongTensor(np.array(train_dataset['label'])[shuffled_ids])
 
-train_ids = torch.LongTensor(np.array(train_dataset['input_ids']))
-train_lengths = torch.LongTensor(np.array(train_dataset['length'])).cpu()
-train_labels = torch.LongTensor(np.array(train_dataset['label']))
-
-eval_ids = torch.LongTensor(test_dataset['input_ids'])
+eval_ids = torch.LongTensor(np.array(test_dataset['input_ids']))
 eval_lengths = torch.LongTensor(test_dataset['length']).cpu()
 eval_labels = torch.LongTensor(test_dataset['label'])
 

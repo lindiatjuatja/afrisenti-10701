@@ -10,8 +10,7 @@ import gc
 from transformers.trainer_callback import ProgressCallback
 from train_da import run_da_experiment
 
-from utils import get_source_data, get_target_data, make_model, slot_in_adapter
-
+from utils import get_source_data, get_target_data
 import argparse
 
 def main():
@@ -66,6 +65,8 @@ def main():
                             help="Learning rate for discrimintor and classifier")
     parser.add_argument("--da_parallel", action="store_true",
                             help="Use parallel adapters for data types in DA")
+    parser.add_argument("--da_save_losses", action="store_true",
+                            help="Save losses to {source}_{target}_da.csv")
     parser.add_argument("--da_repr", default=500, type=int,
                             help="Size of representation for domain adaptation methods")
     parser.add_argument("--da_finetune", action="store_true",
